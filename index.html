@@ -377,8 +377,15 @@ async function processCoin(sym) {
     const shortRatio = lsRatio.length ? parseFloat(lsRatio[lsRatio.length-1].shortAccount)*100 : 50;
 
     // Taker ratio (sell pressure)
-    const takerLatest = takerRatio.length ? parseFloat(takerRatio[takerRatio.length-1].sellVolRatio) : 0.5;
-    const takerSellPressure = takerLatest; // >0.5 means more sells
+    // Binance taker ratio: compute sell/(buy+sell) from sellVol and buyVol fields
+    let takerSellPressure = 0.5;
+    if (takerRatio.length) {
+      const t = takerRatio[takerRatio.length-1];
+      // API returns sellVolRatio directly as a ratio string like "0.4523"
+      const raw = parseFloat(t.sellVolRatio || t.sellVol || 0.5);
+      // If raw is between 0 and 1 it's already a ratio, if > 1 need to normalize
+      takerSellPressure = raw > 1 ? 0.5 : (isNaN(raw) ? 0.5 : raw);
+    }
 
     // Order book analysis
     const bids = depth.bids.map(b=>[parseFloat(b[0]),parseFloat(b[1])]);
@@ -479,10 +486,11 @@ function scoreRisk(d) {
   else                     {      signals.push({l:'SHORT CROWD',v:shortPct+' short',c:'g',s:'Balanced'});}
 
   // 10. TAKER SELL PRESSURE
-  const takerPct = (d.takerSellPressure*100).toFixed(0)+'%';
-  if(d.takerSellPressure>0.6)  {     signals.push({l:'SELL PRESSURE',v:takerPct,c:'g',s:'Market selling — confirms short'});}
-  else if(d.takerSellPressure<0.4){s+=8;signals.push({l:'SELL PRESSURE',v:takerPct,c:'r',s:'Market buying — against short'});}
-  else                          {     signals.push({l:'SELL PRESSURE',v:takerPct,c:'y',s:'Mixed'});}
+  const takerRaw = isNaN(d.takerSellPressure) ? 0.5 : d.takerSellPressure;
+  const takerPct = (takerRaw*100).toFixed(0)+'%';
+  if(takerRaw>0.6)   {     signals.push({l:'SELL PRESSURE',v:takerPct,c:'g',s:'Market selling — confirms short'});}
+  else if(takerRaw<0.4){s+=8;signals.push({l:'SELL PRESSURE',v:takerPct,c:'r',s:'Market buying — against short'});}
+  else                 {     signals.push({l:'SELL PRESSURE',v:takerPct,c:'y',s:'Mixed'});}
 
   // 11. ORDER BOOK BIAS
   const obPct = (d.orderBookBias*100).toFixed(0)+'%';
